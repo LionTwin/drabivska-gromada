@@ -40,15 +40,22 @@ def normalize_url(url):
 # Завантаження оброблених URL з JSON
 def load_informed_urls():
     if os.path.exists('informed_urls.json'):
-        if os.path.getsize('informed_urls.json') > 0:  # Перевірка, чи файл не порожній
+        if os.path.getsize('informed_urls.json') > 0:
             with open('informed_urls.json', 'r', encoding='utf-8') as file:
-                return set(normalize_url(url) for url in json.load(file))
-    return set()
+                urls_data = json.load(file)
+                informed_urls = {normalize_url(item['url']): item['timestamp'] for item in urls_data}
+                logging.info(f"Loaded {len(informed_urls)} informed URLs")
+                return informed_urls
+    logging.info("No informed URLs loaded")
+    return {}
 
 # Збереження оброблених URL в JSON
 def save_informed_urls(informed_urls):
+    logging.info(f"Saving {len(informed_urls)} informed URLs")
+    urls_data = [{'url': url, 'timestamp': timestamp} for url, timestamp in informed_urls.items()]
     with open('informed_urls.json', 'w', encoding='utf-8') as file:
-        json.dump(list(informed_urls), file, ensure_ascii=False, indent=4)
+        json.dump(urls_data, file, ensure_ascii=False, indent=4)
+    logging.info("Informed URLs saved successfully")
 
 # Завантаження JSON даних
 def load_json(filename):
@@ -137,57 +144,128 @@ def format_date(date_str):
 def main():
     while True:
         try:
+            logging.info("Starting main function")
             if not os.path.exists('pages'):
                 os.makedirs('pages')
 
-            informed_urls = load_informed_urls()
+            logging.info("Loading informed URLs")
+            try:
+                informed_urls = load_informed_urls()
+            except Exception as e:
+                logging.error(f"Error loading informed URLs: {e}")
+                return
 
             # Завантаження нових записів
-            download_sitemap()
-            sitemap_entries = parse_sitemap()
+            logging.info("Downloading sitemap")
+            try:
+                download_sitemap()
+            except Exception as e:
+                logging.error(f"Error downloading sitemap: {e}")
+                return
+
+            logging.info("Parsing sitemap")
+            try:
+                sitemap_entries = parse_sitemap()
+            except Exception as e:
+                logging.error(f"Error parsing sitemap: {e}")
+                return
 
             # Завантаження існуючих записів у JSON
-            old_entries = load_json('sitemap.json')
+            logging.info("Loading old entries")
+            try:
+                old_entries = load_json('sitemap.json')
+            except Exception as e:
+                logging.error(f"Error loading old entries: {e}")
+                return
 
             # Порівняння старих і нових записів
-            new_entries = compare_sitemaps(old_entries, sitemap_entries)
+            logging.info("Comparing sitemaps")
+            try:
+                new_entries = compare_sitemaps(old_entries, sitemap_entries)
+            except Exception as e:
+                logging.error(f"Error comparing sitemaps: {e}")
+                return
+            logging.info(f"Found {len(new_entries)} new entries")
 
             # Збереження всіх записів у JSON
-            save_json(sitemap_entries, 'sitemap.json')
+            logging.info("Save sitemap json")
+            try:
+                save_json(sitemap_entries, 'sitemap.json')
+            except Exception as e:
+                logging.error(f"Error save sitemap json: {e}")
+                return
 
             # Обробка нових записів
             for entry in new_entries:
                 loc = entry['loc']
-                normalized_loc = normalize_url(loc)
+                logging.info("Normalize url")
+                try:
+                    normalized_loc = normalize_url(loc)
+                except Exception as e:
+                    logging.error(f"Error save sitemap json: {e}")
+                    return
+                logging.info(f"Processing new entry: {loc}")
+                logging.info(f"Normalized URL: {normalized_loc}")
 
                 # Перевірка, чи URL вже був оброблений
                 if normalized_loc in informed_urls:
                     continue
 
-                informed_urls.add(normalized_loc)
-                save_informed_urls(informed_urls)
+                logging.info("Add informed urls")
+                try:
+                    informed_urls.add(normalized_loc)
+                except Exception as e:
+                    logging.error(f"Error add informed urls: {e}")
+                    return
+
+                logging.info("Save informed urls")
+                try:
+                    save_informed_urls(informed_urls)
+                except Exception as e:
+                    logging.error(f"Error save informed urls: {e}")
+                    return
 
                 lastmod = entry['lastmod']
                 filename = loc.replace("https://drabivska-gromada.gov.ua/", "").replace("/", "_") + ".html"
                 html_filename = os.path.join('pages', filename)
 
                 # Збереження HTML сторінки
-                save_html_page(loc, html_filename)
+                logging.info("Save html page")
+                try:
+                    save_html_page(loc, html_filename)
+                except Exception as e:
+                    logging.error(f"Error save html page: {e}")
+                    return
 
                 # Отримання даних зі сторінки
-                page_data = fetch_page_data(loc, lastmod)
+                logging.info("Fetch html page data")
+                try:
+                    page_data = fetch_page_data(loc, lastmod)
+                except Exception as e:
+                    logging.error(f"Error fetch html page data: {e}")
+                    return
 
                 if page_data:
                     # Відправка повідомлення в Telegram
+                    logging.info("Send Telegram message")
                     formatted_date = format_date(page_data['time'])
                     message = f"_{formatted_date}_\n*{page_data['title']}*\n\n{page_data['description']}\n\n{page_data['url']}\n"
-                    send_telegram_message(CHAT_ID, message)
+                    logging.info("Send Telegram message")
+                    try:
+                        send_telegram_message(CHAT_ID, message)
+                    except Exception as e:
+                        logging.error(f"Error sending Telegram message: {e}")
+                        return
                 else:
                     print(f"Не вдалося отримати дані для {loc}.")
+                logging.info("Main function completed")
             t.sleep(3600)  # Пауза на 1 годину
         except Exception as e:
+            logging.error(f"Unhandled exception in main: {e}")
             print(f"An error occurred: {e}")
-            t.sleep(60)  # Пауза на 1 хвилину перед повторною спробою
+        finally:
+            logging.info("Main function finished")
+        t.sleep(300)  # Пауза на 5 хвилини перед повторною спробою
 
 if __name__ == "__main__":
     try:
