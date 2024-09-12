@@ -21,7 +21,10 @@ SITEMAP_URL = "https://drabivska-gromada.gov.ua/sitemap.xml"
 SITEMAP_FILE = "sitemap_local.xml"
 PARSER_FILE = "parser.json"
 INFORM_LOG_FILE = "inform.log"
-TELEGRAM_BOT_TOKEN = config.get('telegram', 'TELEGRAM_BOT_TOKEN')
+import os
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+if TELEGRAM_BOT_TOKEN is None:
+    raise ValueError("TELEGRAM_BOT_TOKEN is not set. Please check your environment variables.")
 CHAT_ID = config.get('telegram', 'CHAT_ID')
 
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
@@ -171,9 +174,11 @@ def format_date(date_str):
 
 def load_informed_urls():
     if os.path.exists('informed_urls.json'):
-        with open('informed_urls.json', 'r', encoding='utf-8') as file:
-            return set(json.load(file))
+        if os.path.getsize('informed_urls.json') > 0:  # Перевіряємо, чи файл не порожній
+            with open('informed_urls.json', 'r', encoding='utf-8') as file:
+                return set(json.load(file))
     return set()
+
 
 def save_informed_urls(informed_urls):
     with open('informed_urls.json', 'w', encoding='utf-8') as file:
