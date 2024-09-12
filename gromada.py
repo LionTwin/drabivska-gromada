@@ -7,11 +7,16 @@ from datetime import datetime
 import telebot
 from urllib.parse import urlparse, urlunparse
 from dotenv import load_dotenv
+import sys
+import logging
 
 # Основні параметри
 SITEMAP_URL = "https://drabivska-gromada.gov.ua/sitemap.xml"
 SITEMAP_FILE = "sitemap_local.xml"
 PARSER_FILE = "parser.json"
+
+logging.basicConfig(stream=sys.stdout, level=logging.INFO)
+logging.info("Script started")
 
 load_dotenv()
 # Отримання TELEGRAM_BOT_TOKEN і CHAT_ID зі змінних середовища
@@ -185,4 +190,12 @@ def main():
             t.sleep(60)  # Пауза на 1 хвилину перед повторною спробою
 
 if __name__ == "__main__":
-    main()
+    try:
+        logging.info("Entering main block")
+        main()
+    except Exception as e:
+        logging.error(f"An unhandled exception occurred: {e}")
+    finally:
+        logging.info("Script finished, waiting indefinitely")
+        while True:
+            t.sleep(3600)
