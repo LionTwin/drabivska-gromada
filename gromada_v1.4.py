@@ -130,53 +130,59 @@ def format_date(date_str):
 
 # Основна функція
 def main():
-    if not os.path.exists('pages'):
-        os.makedirs('pages')
+    while True:
+        try:
+            if not os.path.exists('pages'):
+                os.makedirs('pages')
 
-    informed_urls = load_informed_urls()
+            informed_urls = load_informed_urls()
 
-    # Завантаження нових записів
-    download_sitemap()
-    sitemap_entries = parse_sitemap()
+            # Завантаження нових записів
+            download_sitemap()
+            sitemap_entries = parse_sitemap()
 
-    # Завантаження існуючих записів у JSON
-    old_entries = load_json('sitemap.json')
+            # Завантаження існуючих записів у JSON
+            old_entries = load_json('sitemap.json')
 
-    # Порівняння старих і нових записів
-    new_entries = compare_sitemaps(old_entries, sitemap_entries)
+            # Порівняння старих і нових записів
+            new_entries = compare_sitemaps(old_entries, sitemap_entries)
 
-    # Збереження всіх записів у JSON
-    save_json(sitemap_entries, 'sitemap.json')
+            # Збереження всіх записів у JSON
+            save_json(sitemap_entries, 'sitemap.json')
 
-    # Обробка нових записів
-    for entry in new_entries:
-        loc = entry['loc']
-        normalized_loc = normalize_url(loc)
+            # Обробка нових записів
+            for entry in new_entries:
+                loc = entry['loc']
+                normalized_loc = normalize_url(loc)
 
-        # Перевірка, чи URL вже був оброблений
-        if normalized_loc in informed_urls:
-            continue
+                # Перевірка, чи URL вже був оброблений
+                if normalized_loc in informed_urls:
+                    continue
 
-        informed_urls.add(normalized_loc)
-        save_informed_urls(informed_urls)
+                informed_urls.add(normalized_loc)
+                save_informed_urls(informed_urls)
 
-        lastmod = entry['lastmod']
-        filename = loc.replace("https://drabivska-gromada.gov.ua/", "").replace("/", "_") + ".html"
-        html_filename = os.path.join('pages', filename)
+                lastmod = entry['lastmod']
+                filename = loc.replace("https://drabivska-gromada.gov.ua/", "").replace("/", "_") + ".html"
+                html_filename = os.path.join('pages', filename)
 
-        # Збереження HTML сторінки
-        save_html_page(loc, html_filename)
+                # Збереження HTML сторінки
+                save_html_page(loc, html_filename)
 
-        # Отримання даних зі сторінки
-        page_data = fetch_page_data(loc, lastmod)
+                # Отримання даних зі сторінки
+                page_data = fetch_page_data(loc, lastmod)
 
-        if page_data:
-            # Відправка повідомлення в Telegram
-            formatted_date = format_date(page_data['time'])
-            message = f"_{formatted_date}_\n*{page_data['title']}*\n\n{page_data['description']}\n\n{page_data['url']}\n"
-            send_telegram_message(CHAT_ID, message)
-        else:
-            print(f"Не вдалося отримати дані для {loc}.")
+                if page_data:
+                    # Відправка повідомлення в Telegram
+                    formatted_date = format_date(page_data['time'])
+                    message = f"_{formatted_date}_\n*{page_data['title']}*\n\n{page_data['description']}\n\n{page_data['url']}\n"
+                    send_telegram_message(CHAT_ID, message)
+                else:
+                    print(f"Не вдалося отримати дані для {loc}.")
+            t.sleep(3600)  # Пауза на 1 годину
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            t.sleep(60)  # Пауза на 1 хвилину перед повторною спробою
 
 if __name__ == "__main__":
     main()
