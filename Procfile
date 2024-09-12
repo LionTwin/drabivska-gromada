@@ -1,1 +1,1 @@
-worker: python gromada_v1.4.py
+worker: python gromada.py
