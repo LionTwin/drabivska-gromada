@@ -1,10 +1,6 @@
 import requests
 import json
 
-# Завантаження даних з файлу informed_urls.json
-with open('informed_urls.json', 'r') as file:
-    data = json.load(file)
-
 def check_url(url):
     try:
         response = requests.get(url)
@@ -12,15 +8,20 @@ def check_url(url):
     except requests.RequestException:
         return False
 
+# Завантаження даних з файлу informed_urls.json
+with open('informed_urls.json', 'r') as file:
+    data = json.load(file)
+
 # Обробка URL
 for item in data:
     url = item['url']
     is_error = check_url(url)
     if is_error:
         print(f"URL {url} призвів до помилки 404")
-        # Записуємо крок у файл noinformed_urls.json
+        # Додавання помилкового URL до списку
+        error_entry = {'url': url, 'timestamp': item['timestamp']}
         with open('noinformed_urls.json', 'a') as noinformed_file:
-            json.dump({'url': url, 'error': 404}, noinformed_file)
+            json.dump(error_entry, noinformed_file)
             noinformed_file.write('\n')
 
 # Видалення помилкових URL зі списку
