@@ -14,30 +14,24 @@ import logging
 SITEMAP_URL = "https://drabivska-gromada.gov.ua/sitemap.xml"
 SITEMAP_FILE = "sitemap_local.xml"
 PARSER_FILE = "parser.json"
+NOINFORMED_URLS_FILE = "noinformed_urls.json"
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logging.info("Script started")
 
 load_dotenv()
-# Отримання TELEGRAM_BOT_TOKEN і CHAT_ID зі змінних середовища
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# Перевірка наявності необхідних змінних середовища
-if TELEGRAM_BOT_TOKEN is None:
-    raise ValueError("TELEGRAM_BOT_TOKEN is not set. Please check your environment variables.")
-if CHAT_ID is None:
-    raise ValueError("TELEGRAM_CHAT_ID is not set. Please check your environment variables.")
+if TELEGRAM_BOT_TOKEN is None or CHAT_ID is None:
+    raise ValueError("TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is not set. Please check your environment variables.")
 
-# Ініціалізація бота
 bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
 
-# Нормалізація URL
 def normalize_url(url):
     parsed = urlparse(url)
     return urlunparse(parsed._replace(fragment='')).rstrip('/').lower()
 
-# Завантаження оброблених URL з JSON
 def load_informed_urls():
     if os.path.exists('informed_urls.json'):
         if os.path.getsize('informed_urls.json') > 0:
@@ -49,7 +43,6 @@ def load_informed_urls():
     logging.info("No informed URLs loaded")
     return {}
 
-# Збереження оброблених URL в JSON
 def save_informed_urls(informed_urls):
     logging.info(f"Saving {len(informed_urls)} informed URLs")
     urls_data = [{'url': url, 'timestamp': timestamp} for url, timestamp in informed_urls.items()]
@@ -57,7 +50,6 @@ def save_informed_urls(informed_urls):
         json.dump(urls_data, file, ensure_ascii=False, indent=4)
     logging.info("Informed URLs saved successfully")
 
-# Завантаження JSON даних
 def load_json(filename):
     if os.path.exists(filename):
         with open(filename, 'r', encoding='utf-8') as file:
@@ -68,12 +60,10 @@ def load_json(filename):
                 return {}
     return {}
 
-# Збереження даних у форматі JSON
 def save_json(data, filename):
     with open(filename, 'w', encoding='utf-8') as file:
         json.dump(data, file, ensure_ascii=False, indent=4)
 
-# Завантаження та парсинг SITEMAP
 def download_sitemap():
     response = requests.get(SITEMAP_URL)
     with open(SITEMAP_FILE, 'wb') as file:
@@ -90,16 +80,19 @@ def parse_sitemap():
     sitemap_entries.sort(key=lambda x: x['lastmod'])
     return sitemap_entries
 
-# Порівняння старих і нових записів
 def compare_sitemaps(old, new):
     old_set = {entry['loc'] for entry in old}
     return [entry for entry in new if entry['loc'] not in old_set]
 
-# Отримання даних зі сторінки
 def fetch_page_data(url, lastmod):
-    response = requests.get(url)
-    if response.status_code == 404:
-        return None  # Якщо сторінка не існує
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 404:
+            return None
+        else:
+            raise
 
     soup = BeautifulSoup(response.content, 'html.parser')
     og_title = soup.find('meta', attrs={'property': 'og:title'})
@@ -115,13 +108,11 @@ def fetch_page_data(url, lastmod):
         "time": lastmod
     }
 
-# Збереження HTML сторінки
 def save_html_page(url, filename):
     response = requests.get(url)
     with open(filename, 'w', encoding='utf-8') as file:
         file.write(response.text)
 
-# Відправка повідомлення в Telegram
 def send_telegram_message(chat_id, message):
     while True:
         try:
@@ -135,12 +126,43 @@ def send_telegram_message(chat_id, message):
             else:
                 break
 
-# Форматування дати у вигляді dd.mm.yyyy
 def format_date(date_str):
     date_obj = datetime.strptime(date_str, "%Y-%m-%d")
     return date_obj.strftime("%d.%m.%Y")
 
-# Основна функція
+def load_noinformed_urls():
+    if os.path.exists(NOINFORMED_URLS_FILE):
+        with open(NOINFORMED_URLS_FILE, 'r', encoding='utf-8') as file:
+            data = json.load(file)
+            # Конвертуємо список у словник, якщо це список
+            if isinstance(data, list):
+                return {item['url']: item['timestamp'] for item in data}
+            return data
+    return {}
+
+def save_noinformed_urls(noinformed_urls):
+    with open(NOINFORMED_URLS_FILE, 'w', encoding='utf-8') as file:
+        json.dump(noinformed_urls, file, ensure_ascii=False, indent=4)
+
+def check_noinformed_urls(noinformed_urls, informed_urls):
+    urls_to_remove = []
+    for url, timestamp in noinformed_urls.items():
+        try:
+            response = requests.head(url)
+            if response.status_code != 404:
+                page_data = fetch_page_data(url, timestamp)
+                if page_data:
+                    formatted_date = format_date(page_data['time'])
+                    message = f"_{formatted_date}_\n*{page_data['title']}*\n\n{page_data['description']}\n\n{page_data['url']}\n"
+                    send_telegram_message(CHAT_ID, message)
+                    informed_urls[url] = timestamp
+                    urls_to_remove.append(url)
+        except requests.RequestException:
+            continue
+
+    for url in urls_to_remove:
+        del noinformed_urls[url]
+
 def main():
     while True:
         try:
@@ -149,124 +171,78 @@ def main():
                 os.makedirs('pages')
 
             logging.info("Loading informed URLs")
-            try:
-                informed_urls = load_informed_urls()
-            except Exception as e:
-                logging.error(f"Error loading informed URLs: {e}")
-                return
+            informed_urls = load_informed_urls()
 
-            # Завантаження нових записів
+            logging.info("Loading noinformed URLs")
+            noinformed_urls = load_noinformed_urls()
+
+            logging.info("Checking noinformed URLs")
+            check_noinformed_urls(noinformed_urls, informed_urls)
+
             logging.info("Downloading sitemap")
-            try:
-                download_sitemap()
-            except Exception as e:
-                logging.error(f"Error downloading sitemap: {e}")
-                return
+            download_sitemap()
 
             logging.info("Parsing sitemap")
-            try:
-                sitemap_entries = parse_sitemap()
-            except Exception as e:
-                logging.error(f"Error parsing sitemap: {e}")
-                return
+            sitemap_entries = parse_sitemap()
 
-            # Завантаження існуючих записів у JSON
             logging.info("Loading old entries")
-            try:
-                old_entries = load_json('sitemap.json')
-            except Exception as e:
-                logging.error(f"Error loading old entries: {e}")
-                return
+            old_entries = load_json('sitemap.json')
 
-            # Порівняння старих і нових записів
             logging.info("Comparing sitemaps")
-            try:
-                new_entries = compare_sitemaps(old_entries, sitemap_entries)
-            except Exception as e:
-                logging.error(f"Error comparing sitemaps: {e}")
-                return
+            new_entries = compare_sitemaps(old_entries, sitemap_entries)
             logging.info(f"Found {len(new_entries)} new entries")
 
-            # Збереження всіх записів у JSON
             logging.info("Save sitemap json")
-            try:
-                save_json(sitemap_entries, 'sitemap.json')
-            except Exception as e:
-                logging.error(f"Error save sitemap json: {e}")
-                return
+            save_json(sitemap_entries, 'sitemap.json')
 
-            # Обробка нових записів
             for entry in new_entries:
                 loc = entry['loc']
-                logging.info("Normalize url")
-                try:
-                    normalized_loc = normalize_url(loc)
-                except Exception as e:
-                    logging.error(f"Error save sitemap json: {e}")
-                    return
+                normalized_loc = normalize_url(loc)
                 logging.info(f"Processing new entry: {loc}")
                 logging.info(f"Normalized URL: {normalized_loc}")
 
-                # Перевірка, чи URL вже був оброблений
-                if normalized_loc in informed_urls:
+                if normalized_loc in informed_urls or normalized_loc in noinformed_urls:
+                    logging.info(f"Skipping already processed URL: {normalized_loc}")
                     continue
-
-                logging.info("Add informed urls")
-                try:
-                    informed_urls.add(normalized_loc)
-                except Exception as e:
-                    logging.error(f"Error add informed urls: {e}")
-                    return
-
-                logging.info("Save informed urls")
-                try:
-                    save_informed_urls(informed_urls)
-                except Exception as e:
-                    logging.error(f"Error save informed urls: {e}")
-                    return
 
                 lastmod = entry['lastmod']
                 filename = loc.replace("https://drabivska-gromada.gov.ua/", "").replace("/", "_") + ".html"
                 html_filename = os.path.join('pages', filename)
 
-                # Збереження HTML сторінки
                 logging.info("Save html page")
-                try:
-                    save_html_page(loc, html_filename)
-                except Exception as e:
-                    logging.error(f"Error save html page: {e}")
-                    return
+                save_html_page(loc, html_filename)
 
-                # Отримання даних зі сторінки
                 logging.info("Fetch html page data")
                 try:
                     page_data = fetch_page_data(loc, lastmod)
-                except Exception as e:
-                    logging.error(f"Error fetch html page data: {e}")
-                    return
-
-                if page_data:
-                    # Відправка повідомлення в Telegram
-                    logging.info("Send Telegram message")
-                    formatted_date = format_date(page_data['time'])
-                    message = f"_{formatted_date}_\n*{page_data['title']}*\n\n{page_data['description']}\n\n{page_data['url']}\n"
-                    logging.info("Send Telegram message")
-                    try:
+                    if page_data:
+                        formatted_date = format_date(page_data['time'])
+                        message = f"_{formatted_date}_\n*{page_data['title']}*\n\n{page_data['description']}\n\n{page_data['url']}\n"
                         send_telegram_message(CHAT_ID, message)
-                    except Exception as e:
-                        logging.error(f"Error sending Telegram message: {e}")
-                        return
-                else:
-                    print(f"Не вдалося отримати дані для {loc}.")
-                logging.info("Main function completed")
+                        informed_urls[normalized_loc] = lastmod
+                    else:
+                        noinformed_urls[normalized_loc] = lastmod
+                        logging.info(f"URL {normalized_loc} returned 404, added to noinformed_urls")
+                except Exception as e:
+                    logging.error(f"Error processing {loc}: {e}")
+                    noinformed_urls[normalized_loc] = lastmod
+
+            logging.info("Save informed urls")
+            save_informed_urls(informed_urls)
+
+            logging.info("Save noinformed urls")
+            save_noinformed_urls(noinformed_urls)
+
+            logging.info("Main function completed")
             t.sleep(3600)  # Пауза на 1 годину
+
         except Exception as e:
             logging.error(f"Unhandled exception in main: {e}")
             print(f"An error occurred: {e}")
         finally:
             logging.info("Main function finished")
-        t.sleep(300)  # Пауза на 5 хвилини перед повторною спробою
 
+        t.sleep(300)  # Пауза на 5 хвилин перед повторною спробою
 if __name__ == "__main__":
     try:
         logging.info("Entering main block")
