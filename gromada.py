@@ -1,11 +1,11 @@
-import json
-import requests
 import os
 import time as t
 import logging
 import sys
-from requests.exceptions import RequestException
 from datetime import datetime
+import requests
+import json
+from requests.exceptions import RequestException
 from config import CHAT_ID, NOINFORMED_URLS_FILE
 from utils import normalize_url, load_json, save_json
 from sitemap_parser import download_sitemap, parse_sitemap
@@ -64,6 +64,11 @@ def check_noinformed_urls(noinformed_urls, informed_urls):
     for url in urls_to_remove:
         del noinformed_urls[url]
 
+def is_newer(new_date, old_date):
+    new = datetime.strptime(new_date, "%Y-%m-%d")
+    old = datetime.strptime(old_date, "%Y-%m-%d")
+    return new > old
+
 def main():
     while True:
         try:
@@ -80,18 +85,21 @@ def main():
 
             for entry in sitemap_entries:
                 loc = entry['loc']
+                lastmod = entry['lastmod']  # Переміщено сюди
                 normalized_loc = normalize_url(loc)
-                logging.info(f"Processing entry: {loc}")
+                logging.info(f"Processing entry: {loc}, lastmod: {lastmod}")
 
                 if normalized_loc in informed_urls:
-                    logging.info(f"Skipping already informed URL: {normalized_loc}")
-                    continue
+                    if not is_newer(lastmod, informed_urls[normalized_loc]):
+                        logging.info(f"Skipping already informed and not newer URL: {normalized_loc}")
+                        continue
+                    else:
+                        logging.info(f"Updating information for URL: {normalized_loc}")
 
                 if normalized_loc in noinformed_urls:
                     logging.info(f"URL {normalized_loc} was previously non-informed, rechecking")
                     del noinformed_urls[normalized_loc]
 
-                lastmod = entry['lastmod']
                 filename = loc.replace("https://drabivska-gromada.gov.ua/", "").replace("/", "_") + ".html"
                 html_filename = os.path.join('pages', filename)
 
@@ -102,9 +110,11 @@ def main():
                         message = f"_{formatted_date}_\n*{page_data['title']}*\n\n{page_data['description']}\n\n{page_data['url']}\n"
                         send_telegram_message(CHAT_ID, message)
                         informed_urls[normalized_loc] = lastmod
+                        logging.info(f"Sent message for URL: {normalized_loc}")
 
                         try:
                             save_html_page(loc, html_filename)
+                            logging.info(f"Saved HTML for URL: {normalized_loc}")
                         except RequestException:
                             logging.error(f"Failed to save HTML for {loc}")
                     else:

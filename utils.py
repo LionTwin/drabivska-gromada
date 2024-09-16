@@ -5,10 +5,11 @@ import requests
 from requests.exceptions import RequestException
 import logging
 import time as t
+from datetime import datetime
 
 def normalize_url(url):
     parsed = urlparse(url)
-    return urlunparse(parsed._replace(fragment='')).rstrip('/').lower()
+    return urlunparse(parsed._replace(fragment='', query='')).rstrip('/').lower()
 
 def load_json(filename):
     if os.path.exists(filename):
@@ -24,7 +25,7 @@ def save_json(data, filename):
     with open(filename, 'w', encoding='utf-8') as file:
         json.dump(data, file, ensure_ascii=False, indent=4)
 
-def fetch_with_retry(url, max_retries=3, delay=5):
+def fetch_with_retry(url, max_retries=1, delay=5):
     for attempt in range(max_retries):
         try:
             response = requests.get(url, timeout=10)
